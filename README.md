@@ -113,6 +113,8 @@ The first run downloads the required Docker images and may take a few minutes.
 
 ### 3. Get local Supabase credentials
 
+Use the local key reported by the CLI, not credentials from a production project.
+
 Run:
 
 ```bash
@@ -133,7 +135,17 @@ Set the application URL:
 NEXT_PUBLIC_APP_URL=http://localhost:3001
 ```
 
-Use the local key reported by the CLI, not credentials from a production project.
+Set Supabase publishable key (It will under Authentication Keys, in CLI)
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_ANON_KEY= sb_publishable_....
+```
+
+Set Supabase service role key (Server-side only — NEVER expose this to the browser) (It will under Authentication Keys, in CLI)
+
+```dotenv
+SUPABASE_SERVICE_ROLE_KEY= sb_secret_....
+```  
 
 ### 4. Apply database migrations
 
@@ -149,13 +161,22 @@ npx supabase db reset
 
 If the repository does not include a seed file, make sure `supabase/config.toml` does not reference a missing seed file before resetting the database.
 
+If you get "▲  no files matched pattern: supabase/seed.sql", It was just a default item data, which i used for testing and I removed it later, it doesn't break anything, so move pass through it.
+
 ### 5. Start the application
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001).
+### 6. How to use
+
+* Go to [Local Supabase Studio](http://127.0.0.1:54323).
+* Then Authentication from side panel
+* Add User -> Create New User -> enter any email, doesnt have to be a working email, could be random and a password and check the "Auto confirm user?"
+
+* Use the same email and password here in [Local Website](http://localhost:3001).
+
 
 ### Stop local Supabase
 
@@ -253,6 +274,20 @@ blue-box-erp/
 ├── package.json
 └── README.md
 ```
+
+# New to ERP flow? Here is a small flow
+
+1) Create a Item for a material type using template in master data -> Items -> Import Item
+2) Download the template and fill it accordingly with instructions and upload it, click upload items, top right
+3) Head to master data -> Client, add a client and same for supplier
+4) Create a GRN from Inbount -> New GRN -> use the newly created item from drop down
+5) Head to dashboard, you will see the status, alternativly you can see in Master data->Inventory, and search for that item
+6) Create a quotation for the newly created client -> approve it -> convert it to sales order from top right corner button
+7) Head to sales order, and reserve it, stocks will be reserved, click dispatch, and it will deducted
+8) Record payment
+
+There are more flows, this one is basic, you can explore by your own. Good luck.
+
 
 ## Security
 
