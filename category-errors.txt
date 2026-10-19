@@ -1,0 +1,88 @@
+src/app/(dashboard)/settings/page.tsx:47:        .from("items")
+src/app/(dashboard)/settings/page.tsx:54:          category_id,
+src/app/(dashboard)/settings/page.tsx:55:          item_category:item_categories (
+src/app/(dashboard)/settings/page.tsx:62:              .order("category_id")
+src/app/(dashboard)/settings/page.tsx:82:        .from("items")
+src/app/(dashboard)/settings/page.tsx:83:        .select("id, item_code, name, unit, category")
+src/app/(dashboard)/settings/page.tsx:85:        .order("category")
+src/app/(dashboard)/settings/page.tsx:522:                            {item.item_category?.name ?? "—"}
+src/app/(dashboard)/dispatch/[id]/page.tsx:60:                        category_id,
+src/app/(dashboard)/dispatch/[id]/page.tsx:61:                        item_category:item_categories (
+src/app/(dashboard)/dispatch/[id]/page.tsx:436:                          {line.item?.item_category?.name ?? "—"}
+src/app/(dashboard)/inventory/page.tsx:28:  const [categoryId, setCategoryId] = useState("");
+src/app/(dashboard)/inventory/page.tsx:88:    if (categoryId && item.category_id !== categoryId) return false;
+src/app/(dashboard)/inventory/page.tsx:161:            value={categoryId}
+src/app/(dashboard)/inventory/page.tsx:274:                        <Badge variant="default">{item.category ?? "—"}</Badge>
+src/app/(dashboard)/inbound/new/page.tsx:74:        .from("items")
+src/app/(dashboard)/inbound/[id]/page.tsx:44:          item:items ( id, item_code, name, unit, category )
+src/app/(dashboard)/production/new/page.tsx:46:        .from("items")
+src/app/(dashboard)/production/new/page.tsx:47:        .select("id, item_code, name, unit, category")
+src/app/(dashboard)/production/new/page.tsx:69:        .from("items")
+src/app/(dashboard)/production/new/page.tsx:70:        .select("id, item_code, name, unit, category")
+src/app/(dashboard)/quotations/new/page.tsx:71:        .from("items")
+src/app/(dashboard)/quotations/new/page.tsx:72:        .select("id, item_code, name, unit, hsn_code, category")
+src/app/(dashboard)/items/import-bom/page.tsx:40:        .from('items')
+src/app/(dashboard)/items/[id]/page.tsx:26:        .from("items")
+src/app/(dashboard)/items/[id]/page.tsx:30:      item_category:item_categories (
+src/app/(dashboard)/items/[id]/page.tsx:76:          item.item_category?.name ?? "—"
+src/app/(dashboard)/items/[id]/page.tsx:104:                    {item.item_category?.name ?? "—"}
+src/app/(dashboard)/items/[id]/page.tsx:108:              <Row label="Sub-Category" value={item.sub_category ?? "—"} />
+src/app/(dashboard)/items/import/page.tsx:102:        category: null,
+src/app/(dashboard)/items/import/page.tsx:110:        .from('items')
+src/app/(dashboard)/items/import/page.tsx:147:              Columns: item_code, name, category, sub_category, material_type, size_spec,
+src/app/(dashboard)/items/import/page.tsx:201:                      <td className="px-3 py-2 text-slate-600">{String(r.raw.category ?? '—')}</td>
+src/app/(dashboard)/items/page.tsx:23:  categoryId: string,
+src/app/(dashboard)/items/page.tsx:29:    queryKey: ["items-with-prices", orgId, search, categoryId],
+src/app/(dashboard)/items/page.tsx:35:        .from("items")
+src/app/(dashboard)/items/page.tsx:38:          id, item_code, name, category_id, sub_category,
+src/app/(dashboard)/items/page.tsx:45:        .order("category_id")
+src/app/(dashboard)/items/page.tsx:48:      if (categoryId) {
+src/app/(dashboard)/items/page.tsx:49:        query = query.eq("category_id", categoryId);
+src/app/(dashboard)/items/page.tsx:83:  const [categoryId, setCategoryId] = useState("");
+src/app/(dashboard)/items/page.tsx:89:    const categoryNameById = new Map(
+src/app/(dashboard)/items/page.tsx:90:      categories?.map((category) => [category.id, category.name]) ?? []
+src/app/(dashboard)/items/page.tsx:95:    categoryId,
+src/app/(dashboard)/items/page.tsx:140:            value={categoryId}
+src/app/(dashboard)/items/page.tsx:147:            {categories?.map((category) => (
+src/app/(dashboard)/items/page.tsx:148:              <option key={category.id} value={category.id}>
+src/app/(dashboard)/items/page.tsx:149:                {category.name}
+src/app/(dashboard)/items/page.tsx:233:                        {item.category_id
+src/app/(dashboard)/items/page.tsx:234:                          ? categoryNameById.get(item.category_id) ?? "—"
+src/lib/types/database.ts:881:          category_id: string | null
+src/lib/types/database.ts:898:          sub_category: string | null
+src/lib/types/database.ts:903:          category_id?: string | null
+src/lib/types/database.ts:920:          sub_category?: string | null
+src/lib/types/database.ts:925:          category_id?: string | null
+src/lib/types/database.ts:942:          sub_category?: string | null
+src/lib/types/database.ts:955:            foreignKeyName: "items_org_category_fk"
+src/lib/types/database.ts:956:            columns: ["org_id", "category_id"]
+src/lib/types/database.ts:1913:          category: string | null
+src/lib/types/database.ts:1914:          category_id: string | null
+src/lib/types/database.ts:1947:          category: string | null
+src/lib/types/database.ts:1948:          category_id: string | null
+src/lib/types/database.ts:2108:      item_category:
+src/lib/types/database.ts:2318:      item_category: [
+src/lib/utils/item-import.ts:33:    category_id: string;
+src/lib/utils/item-import.ts:34:    sub_category: string | null;
+src/lib/utils/item-import.ts:48:// item_code, name, category, sub_category, material_type, size_spec, unit,
+src/lib/utils/item-import.ts:64:    const categoryInput = String(raw.category ?? "").trim();
+src/lib/utils/item-import.ts:66:    const category = categories.find(
+src/lib/utils/item-import.ts:67:        (c) => c.name.toLowerCase() === categoryInput.toLowerCase(),
+src/lib/utils/item-import.ts:70:    if (!category) {
+src/lib/utils/item-import.ts:72:            `category must be one of: ${categories.map((c) => c.name).join(", ")}`
+src/lib/utils/item-import.ts:102:    if (errors.length > 0 || !category || !material_type || !unit) {
+src/lib/utils/item-import.ts:113:            category_id: category.id,
+src/lib/utils/item-import.ts:114:            sub_category: toStringOrNull(raw.sub_category),
+src/lib/hooks/use-items.ts:41:  categoryId?: string
+src/lib/hooks/use-items.ts:54:        .from('items')
+src/lib/hooks/use-items.ts:56:        .order('category_id')
+src/lib/hooks/use-items.ts:65:      if (filters?.categoryId) {
+src/lib/hooks/use-items.ts:66:        query = query.eq('category_id', filters.categoryId)
+src/lib/hooks/use-items.ts:71:          `name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,sub_category.ilike.%${filters.search}%`
+src/lib/hooks/use-items.ts:94:        .from('items')
+src/lib/hooks/use-items.ts:133:        .from('items')
+src/lib/hooks/use-stock.ts:22:        .order('category_id')
+src/lib/hooks/use-production.ts:126:        .from('items')
+src/lib/hooks/use-production.ts:127:        .select('id, item_code, name, unit, category')
+src/lib/hooks/use-production.ts:151:        .from('items')
+src/lib/hooks/use-production.ts:152:        .select('id, item_code, name, unit, category')
