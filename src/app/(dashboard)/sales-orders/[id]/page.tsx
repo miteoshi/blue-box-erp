@@ -161,8 +161,6 @@ const { data: reservations } = useQuery({
       {
         id,
         amount,
-        currentAdvance: salesOrder.advance_paid ?? 0,
-        totalAmount:    salesOrder.total_amount,
       },
       {
         onSuccess: () => {

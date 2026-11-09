@@ -2084,6 +2084,19 @@ export type Database = {
         }
         Returns: string
       }
+      create_quotation: {
+        Args: {
+          p_client_id: string
+          p_delivery_days?: number
+          p_lines: Json
+          p_notes?: string
+          p_payment_terms?: string
+          p_submit?: boolean
+          p_transport_note?: string
+          p_valid_until?: string
+        }
+        Returns: Json
+      }
       create_production_order: {
         Args: {
           p_expiry_hours?: number
@@ -2196,8 +2209,20 @@ export type Database = {
         }
         Returns: Json
       }
+      record_so_payment: {
+        Args: { p_amount: number; p_so_id: string }
+        Returns: Json
+      }
       reserve_sales_order: {
         Args: { p_expiry_hours?: number; p_so_id: string }
+        Returns: Json
+      }
+      set_quotation_status: {
+        Args: {
+          p_comments?: string
+          p_quotation_id: string
+          p_status: Database["public"]["Enums"]["document_status"]
+        }
         Returns: Json
       }
       start_production_order: {

@@ -127,23 +127,17 @@ export function useRecordPayment() {
     mutationFn: async ({
       id,
       amount,
-      currentAdvance,
-      totalAmount,
     }: {
       id: string
       amount: number
-      currentAdvance: number
-      totalAmount: number
     }) => {
-      const newAdvance = currentAdvance + amount
-      const { error } = await supabase
-        .from('sales_orders')
-        .update({
-          advance_paid: newAdvance,
-          balance_due: totalAmount - newAdvance,
-        })
-        .eq('id', id)
-      if (error) throw error
+      // Atomic increment in the database, refused above the balance due —
+      // two payments recorded at the same time can no longer lose one.
+      const { error } = await supabase.rpc('record_so_payment', {
+        p_so_id:  id,
+        p_amount: amount,
+      })
+      if (error) throw new Error(error.message)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales-orders'] })
