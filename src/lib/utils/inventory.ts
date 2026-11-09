@@ -342,3 +342,66 @@ export async function convertQuotationToSalesOrder(quotationId: string) {
   if (error) throw new Error(error.message)
   return data as { success: boolean; id: string; so_number: string }
 }
+
+// ─────────────────────────────────────────────────────────────
+// Production workflow RPCs (one transaction each, order row locked)
+// ─────────────────────────────────────────────────────────────
+
+// ── create_production_order ───────────────────────────────────
+// Order + finished-goods line + raw-material reservations.
+// materials[].qty is the TOTAL needed for this order.
+export async function createProductionOrder(params: {
+  finishedItemId: string
+  qty:            number
+  materials:      Array<{ itemId: string; qty: number }>
+  targetDate?:    string
+  notes?:         string
+  expiryHours?:   number
+}) {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('create_production_order', {
+    p_finished_item_id: params.finishedItemId,
+    p_qty:              params.qty,
+    p_materials:        params.materials.map((m) => ({ item_id: m.itemId, qty: m.qty })),
+    p_target_date:      params.targetDate,
+    p_notes:            params.notes,
+    p_expiry_hours:     params.expiryHours ?? 168,
+  })
+  if (error) throw new Error(error.message)
+  return data as { success: boolean; id: string; po_number: string; materials_reserved: number }
+}
+
+// ── start_production_order ────────────────────────────────────
+// Consumes every planned raw material and moves the order to
+// in_progress. Lapsed reservations are taken from available stock.
+export async function startProductionOrder(productionOrderId: string) {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('start_production_order', {
+    p_production_order_id: productionOrderId,
+  })
+  if (error) throw new Error(error.message)
+  return data as { success: boolean; id: string; po_number: string; materials_consumed: number }
+}
+
+// ── complete_production_order ─────────────────────────────────
+// Adds only the not-yet-produced finished goods to stock and marks
+// the order completed — a retry can never double-count.
+export async function completeProductionOrder(productionOrderId: string) {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('complete_production_order', {
+    p_production_order_id: productionOrderId,
+  })
+  if (error) throw new Error(error.message)
+  return data as { success: boolean; id: string; po_number: string; qty_produced: number }
+}
+
+// ── cancel_production_order ───────────────────────────────────
+// Pending / on-hold orders only: releases reserved raw materials.
+export async function cancelProductionOrder(productionOrderId: string) {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('cancel_production_order', {
+    p_production_order_id: productionOrderId,
+  })
+  if (error) throw new Error(error.message)
+  return data as { success: boolean; id: string; po_number: string; reservations_released: number }
+}

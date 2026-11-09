@@ -9,6 +9,8 @@ import {
   useProductionOrder,
   useAssignWorker,
 } from '@/lib/hooks/use-production'
+import { useCanApprove } from '@/lib/hooks/use-profile'
+import { cancelProductionOrder } from '@/lib/utils/inventory'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -16,7 +18,7 @@ import { Badge, ProductionStatusBadge } from '@/components/ui/badge'
 import { PageLoader } from '@/components/ui/spinner'
 import { formatDate, formatQty } from '@/lib/utils/format'
 import { toast } from 'sonner'
-import { ArrowLeft, Users, Package, Plus, Info } from 'lucide-react'
+import { ArrowLeft, Users, Package, Plus, Info, XCircle, AlertTriangle } from 'lucide-react'
 
 function useWorkers(orgId: string | null) {
   const supabase = createClient();
@@ -48,6 +50,10 @@ const { data: order, isLoading } = useProductionOrder(id);
 const { mutate: assignWorker, isPending: assigningWorker } = useAssignWorker();
 const { data: workers = [] } = useWorkers(orgId);
   const [selectedWorker, setSelectedWorker] = useState('')
+  const qc         = useQueryClient()
+  const canCancel  = useCanApprove()   // admin / manager
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [cancelling,        setCancelling]        = useState(false)
 
   if (isLoading) return <PageLoader />
   if (!order)    return <div className="text-slate-500 text-sm p-6">Production order not found</div>
@@ -59,10 +65,37 @@ const { data: workers = [] } = useWorkers(orgId);
   const isPending    = order.status === 'pending'
   const isInProgress = order.status === 'in_progress'
   const isCompleted  = order.status === 'completed'
+  const isCancelled  = order.status === 'cancelled'
+  // Only before materials are consumed — after Start they are gone
+  const isCancellable = order.status === 'pending' || order.status === 'on_hold'
   // Workers can be assigned as long as order isn't completed
   const canAssign    = isPending || isInProgress
 
   const assignedWorkerIds = assignments.map((a: any) => a.worker?.id)
+
+  // ── Cancel — releases reserved raw materials (one DB transaction) ──
+  async function handleCancel() {
+    setCancelling(true)
+    try {
+      const result = await cancelProductionOrder(id)
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['production-orders'] }),
+        qc.invalidateQueries({ queryKey: ['production-reservations'] }),
+        qc.invalidateQueries({ queryKey: ['tasks'] }),
+        qc.invalidateQueries({ queryKey: ['stock-levels'] }),
+      ])
+      toast.success(
+        result.reservations_released > 0
+          ? `${result.po_number} cancelled — ${result.reservations_released} reservation(s) released back to available stock`
+          : `${result.po_number} cancelled`
+      )
+      setShowCancelConfirm(false)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel production order')
+    } finally {
+      setCancelling(false)
+    }
+  }
 
   return (
     <div>
@@ -75,11 +108,51 @@ const { data: workers = [] } = useWorkers(orgId);
           Back
         </Button>
         {/* ── No Start / Hold / Resume / Complete buttons here ──
-            All status transitions happen from My Tasks page only  */}
+            Those transitions happen from My Tasks page only.
+            Cancel is a manager decision, so it lives here. */}
+        {isCancellable && canCancel && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowCancelConfirm(true)}
+            style={{ borderColor: 'rgba(239,68,68,0.4)', color: '#ef4444' }}
+          >
+            <XCircle className="w-4 h-4" />
+            Cancel Order
+          </Button>
+        )}
       </PageHeader>
 
+      {/* ── Cancel confirmation ── */}
+      {showCancelConfirm && isCancellable && (
+        <div className="mb-6 flex items-start gap-4 bg-red-50 border border-red-200 rounded-xl px-5 py-4">
+          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-red-800 mb-1">
+              Cancel {order.po_number}?
+            </p>
+            <p className="text-sm text-red-700">
+              Reserved raw materials go back to available stock. This cannot be undone.
+            </p>
+            <div className="flex gap-3 mt-3">
+              <Button
+                size="sm"
+                loading={cancelling}
+                onClick={handleCancel}
+                style={{ background: '#ef4444', color: '#fff' }}
+              >
+                Yes, Cancel Order
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowCancelConfirm(false)}>
+                Keep Order
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Info banner — tells user where to act */}
-      {!isCompleted && (
+      {!isCompleted && !isCancelled && (
         <div className="mb-6 flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-5 py-3">
           <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-blue-800">

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { useProfile } from '@/lib/hooks/use-profile'
-import { produceInventory, consumeInventory } from '@/lib/utils/inventory'
+import { startProductionOrder, completeProductionOrder } from '@/lib/utils/inventory'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -143,7 +143,6 @@ function useTasks(
 }
 
 export default function TasksPage() {
-  const supabase = createClient()
   const qc       = useQueryClient()
 
   const { data: profile, isLoading: profileLoading } = useProfile()
@@ -163,99 +162,46 @@ export default function TasksPage() {
   const isWorkerOrProduction = profile?.role === 'production'
   const isAdminOrManager     = profile?.role === 'admin' || profile?.role === 'manager'
 
-  // ── Start production — consumes reserved raw materials ────
-  async function handleStart(orderId: string, poNumber: string) {
+  // ── Start production — consumes the planned raw materials ──
+  // One transaction in the database: every raw material reserved for the
+  // order is consumed (a lapsed reservation is taken from available stock)
+  // and the order moves to in_progress — or nothing changes.
+  async function handleStart(orderId: string) {
     setStartingId(orderId)
     try {
-      // Get active reservations for this production order
-      const { data: reservations, error: resErr } = await supabase
-        .from('stock_reservations')
-        .select('id, item_id, qty_reserved, qty_consumed')
-        .eq('ref_type', 'production_order')
-        .eq('ref_id', orderId)
-        .eq('status', 'active')
+      const result = await startProductionOrder(orderId)
 
-      if (resErr) throw resErr
-
-      if (!reservations || reservations.length === 0) {
-        toast.error('No reserved materials found for this order')
-        return
-      }
-
-      // Consume all reserved raw materials at once
-      for (const reservation of reservations) {
-        const qtyToConsume = reservation.qty_reserved - reservation.qty_consumed
-        if (qtyToConsume <= 0) continue
-
-        await consumeInventory({
-          itemId:        reservation.item_id,
-          qty:           qtyToConsume,
-          reservationId: reservation.id,
-          refId:         orderId,
-          notes:         `Consumed on start — ${poNumber}`,
-        })
-      }
-
-      // Update status to in_progress
-      const { error } = await supabase
-        .from('production_orders')
-        .update({
-          status:     'in_progress',
-          start_date: new Date().toISOString().split('T')[0],
-        })
-        .eq('id', orderId)
-
-      if (error) throw error
-
-      qc.invalidateQueries({ queryKey: ['tasks'] })
-      qc.invalidateQueries({ queryKey: ['stock-levels'] })
-      toast.success(`${poNumber} started — materials consumed`)
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['tasks'] }),
+        qc.invalidateQueries({ queryKey: ['production-orders'] }),
+        qc.invalidateQueries({ queryKey: ['stock-levels'] }),
+      ])
+      toast.success(`${result.po_number} started — materials consumed`)
 
     } catch (err: unknown) {
-  toast.error(err instanceof Error ? err.message : 'Operation failed')
+      toast.error(err instanceof Error ? err.message : 'Operation failed')
     } finally {
       setStartingId(null)
     }
   }
 
   // ── Complete production — adds finished goods to stock ────
-  async function handleComplete(orderId: string, poNumber: string, items: any[]) {
+  // One transaction: only the not-yet-produced quantity is added to stock
+  // and the order is marked completed, so a retry can't double-count.
+  async function handleComplete(orderId: string) {
     setCompletingId(orderId)
     try {
-      // Produce finished goods into stock
-      for (const item of items) {
-        await produceInventory({
-          itemId: item.item?.id,
-          qty:    item.qty_required,
-          refId:  orderId,
-          notes:  `Completed — ${poNumber}`,
-        })
+      const result = await completeProductionOrder(orderId)
 
-        // Update qty_produced
-        await supabase
-          .from('production_order_items')
-          .update({ qty_produced: item.qty_required })
-          .eq('id', item.id)
-      }
-
-      // Mark completed
-      const { error } = await supabase
-        .from('production_orders')
-        .update({
-          status:         'completed',
-          completed_date: new Date().toISOString().split('T')[0],
-        })
-        .eq('id', orderId)
-
-      if (error) throw error
-
-      qc.invalidateQueries({ queryKey: ['tasks'] })
-      qc.invalidateQueries({ queryKey: ['production-orders'] })
-      qc.invalidateQueries({ queryKey: ['stock-levels'] })
-      toast.success(`${poNumber} completed — finished goods added to stock`)
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['tasks'] }),
+        qc.invalidateQueries({ queryKey: ['production-orders'] }),
+        qc.invalidateQueries({ queryKey: ['stock-levels'] }),
+      ])
+      toast.success(`${result.po_number} completed — finished goods added to stock`)
 
     } catch (err: unknown) {
-  toast.error(err instanceof Error ? err.message : 'Operation failed')
+      toast.error(err instanceof Error ? err.message : 'Operation failed')
     } finally {
       setCompletingId(null)
     }
@@ -368,7 +314,7 @@ export default function TasksPage() {
                           <Button
                             size="sm"
                             loading={startingId === task.id}
-                            onClick={() => handleStart(task.id, task.po_number)}
+                            onClick={() => handleStart(task.id)}
                             className="bg-purple-600 hover:bg-purple-700"
                           >
                             <Play className="w-4 h-4" />
@@ -381,7 +327,7 @@ export default function TasksPage() {
                           <Button
                             size="sm"
                             loading={completingId === task.id}
-                            onClick={() => handleComplete(task.id, task.po_number, items)}
+                            onClick={() => handleComplete(task.id)}
                             className="bg-green-600 hover:bg-green-700"
                           >
                             <CheckCircle className="w-4 h-4" />
