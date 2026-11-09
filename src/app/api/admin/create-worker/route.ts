@@ -5,6 +5,7 @@
 // checking the caller's session role server-side.
 // ─────────────────────────────────────────────────────────────
 
+import { randomInt } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
@@ -31,12 +32,24 @@ function generateEmail(name: string): string {
   return `${slug}@bluebox.com`;
 }
 
-// ── Default password ───────────────────────────────────────────
-// Worker gets this on first login, they should change it.
-// You could also generate a random one and show it once.
-function defaultPassword(name: string): string {
-  const slug = name.trim().toLowerCase().replace(/\s+/g, "").slice(0, 6);
-  return `bluebox@${slug}123`; // e.g. "bluebox@ramesh123"
+// ── Initial password ───────────────────────────────────────────
+// Random and shown to the admin exactly once (returned below).
+// The old pattern ("bluebox@<first 6 letters of name>123") could be
+// guessed by anyone who knew a worker's name.
+// No look-alike characters (0/O, 1/l/I) so it can be read out or written down.
+const PASSWORD_ALPHABET =
+  "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
+function generatePassword(length = 12): string {
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)];
+  }
+  return out;
+}
+
+function isEmailTakenError(message: string | undefined): boolean {
+  return !!message && /already (been )?registered|already exists/i.test(message);
 }
 
 export async function POST(req: NextRequest) {
@@ -83,6 +96,13 @@ export async function POST(req: NextRequest) {
     const baseEmail = generateEmail(name);
     const baseSlug = baseEmail.replace("@bluebox.com", "");
 
+    if (!baseSlug) {
+      return NextResponse.json(
+        { error: "Name must contain at least one letter or number" },
+        { status: 400 },
+      );
+    }
+
     let finalEmail = baseEmail;
     let suffix = 2;
 
@@ -110,22 +130,43 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const password = defaultPassword(name);
+    const password = generatePassword();
 
     // ── 4. Create Supabase Auth user ───────────────────────
-    const { data: authData, error: authErr } = await admin.auth.admin
-      .createUser({
+    // org_id goes in app_metadata: only the service role can write it, and
+    // it is the only place the signup trigger reads it from.
+    // If the email already exists in Auth (e.g. a worker row was deleted
+    // but the login was not), move on to the next free suffix.
+    let authData: Awaited<ReturnType<typeof admin.auth.admin.createUser>>["data"] | null = null;
+
+    while (true) {
+      const { data, error: authErr } = await admin.auth.admin.createUser({
         email: finalEmail,
         password,
         email_confirm: true,
         user_metadata: {
           full_name: name.trim(),
+        },
+        app_metadata: {
           org_id: callerOrgId,
         },
       });
 
-    if (authErr) {
-      return NextResponse.json({ error: authErr.message }, { status: 400 });
+      if (!authErr) {
+        authData = data;
+        break;
+      }
+
+      if (!isEmailTakenError(authErr.message) || suffix > 99) {
+        return NextResponse.json({ error: authErr.message }, { status: 400 });
+      }
+
+      finalEmail = `${baseSlug}${suffix}@bluebox.com`;
+      suffix++;
+    }
+
+    if (!authData?.user) {
+      return NextResponse.json({ error: "Could not create login" }, { status: 500 });
     }
 
     const userId = authData.user.id;

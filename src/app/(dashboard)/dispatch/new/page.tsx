@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { useOrgId } from '@/lib/hooks/use-tenant'
-import { dispatchInventory } from '@/lib/utils/inventory'
+import { createDeliveryChallan } from '@/lib/utils/inventory'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -121,7 +121,7 @@ function useSOReservations(soId: string, orgId: string | null) {
 export default function NewChallanPage() {
   const router       = useRouter()
   const searchParams = useSearchParams()
-  const supabase     = createClient()
+  const qc           = useQueryClient()
   const orgId        = useOrgId()
 
 const { data: salesOrders } = useSalesOrdersForDispatch(orgId);
@@ -218,89 +218,38 @@ const { data: reservationMap } = useSOReservations(selectedSoId, orgId);
     }
 
     setSaving(true)
-    const dispatchedItems: Array<{ itemId: string; qty: number }> = []
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-
-      // ── STEP 1: Create challan header first ───────────────
-      // We need the challan id to pass as ref_id to dispatchInventory
-      const { data: dcNo, error: rpcErr } = await supabase.rpc('next_dc_no', {
-        p_org_id: orgId,
+      // One transaction in the database: challan header + lines + stock
+      // dispatch (consuming this SO's reservations first) + qty_dispatched
+      // + SO status. If anything fails, nothing is written.
+      const result = await createDeliveryChallan({
+        soId:          selectedSoId,
+        lines:         lines.map((l) => ({ soLineId: l.so_line_id, qty: l.qty, rate: l.rate })),
+        challanDate,
+        transportMode,
+        vehicleNo:     vehicleNo  || undefined,
+        driverName:    driverName || undefined,
+        notes:         notes      || undefined,
       })
-      if (rpcErr) throw rpcErr
 
-      const { data: challan, error: dcErr } = await supabase
-        .from('delivery_challans')
-        .insert({
-          org_id:         orgId,
-          challan_no:     dcNo as string,
-          so_id:          selectedSoId,
-          client_id:      selectedClient?.id,
-          challan_date:   challanDate,
-          transport_mode: transportMode,
-          vehicle_no:     vehicleNo  || null,
-          driver_name:    driverName || null,
-          total_amount:   totalAmount,
-          status:         'dispatched',
-          notes:          notes      || null,
-          created_by:     user?.id   ?? null,
-        })
-        .select('id')
-        .single()
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['delivery-challans'] }),
+        qc.invalidateQueries({ queryKey: ['sales-orders'] }),
+        qc.invalidateQueries({ queryKey: ['so-for-dispatch'] }),
+        qc.invalidateQueries({ queryKey: ['so-reservations'] }),
+        qc.invalidateQueries({ queryKey: ['stock-levels'] }),
+      ])
 
-      if (dcErr) throw dcErr
-
-      // ── STEP 2: Dispatch each line, consuming its reservation ─
-      // Passing reservation_id tells the DB RPC to:
-      //   1. Deduct from reserved_qty (not available_qty directly)
-      //   2. Mark reservation as consumed / partially_consumed
-      //   3. Record the stock_movement with ref_type='delivery_challan'
-      for (const line of lines) {
-        await dispatchInventory({
-          itemId:        line.item_id,
-          qty:           line.qty,
-          rate:          line.rate,
-          reservationId: line.reservation_id ?? undefined, // null → dispatch from available
-          refId:         challan.id,
-          notes:         `Challan ${dcNo} — SO ${selectedSo?.so_number}`,
-        })
-        dispatchedItems.push({ itemId: line.item_id, qty: line.qty })
-      }
-
-      // ── STEP 3: Insert challan lines (document record) ────
-      const { error: linesErr } = await supabase
-        .from("delivery_challan_lines")
-        .insert(
-          lines.map((l) => ({
-            challan_id: challan.id,
-            item_id: l.item_id,
-            so_line_id: l.so_line_id,
-            qty: l.qty,
-            unit_id: l.unit_id,
-            rate: l.rate,
-          }))
-        );
-
-      if (linesErr) throw linesErr
-
-      // ── STEP 4: Update qty_dispatched on each SO line ─────
-      for (const line of lines) {
-        if (!line.so_line_id) continue
-        const soLine = (selectedSo?.sales_order_lines as any[])
-          ?.find(l => l.id === line.so_line_id)
-        if (!soLine) continue
-        await supabase
-          .from('sales_order_lines')
-          .update({ qty_dispatched: (soLine.qty_dispatched ?? 0) + line.qty })
-          .eq('id', line.so_line_id)
-      }
-
-      toast.success(`Challan ${dcNo} created — ${dispatchedItems.length} items dispatched from reserved stock`)
+      toast.success(
+        result.unreserved_qty > 0
+          ? `Challan ${result.challan_no} created — ${result.lines} line(s) dispatched (${formatQty(result.unreserved_qty)} taken from unreserved stock)`
+          : `Challan ${result.challan_no} created — ${result.lines} line(s) dispatched from reserved stock`
+      )
       router.push('/dispatch')
 
-    } catch (err: any) {
-      toast.error(`Failed: ${err.message}`)
+    } catch (err: unknown) {
+      toast.error(`Failed: ${err instanceof Error ? err.message : 'Could not create challan'}`)
     } finally {
       setSaving(false)
     }

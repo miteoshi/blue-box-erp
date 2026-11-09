@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
+import { markChallanDelivered } from '@/lib/utils/inventory'
+import { useCanDispatch } from '@/lib/hooks/use-profile'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -122,9 +124,9 @@ function useMovements(challanId: string, orgId: string | null) {
 export default function ChallanDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const supabase = createClient();
   const qc = useQueryClient();
   const orgId = useOrgId();
+  const canDispatch = useCanDispatch();
 
   const { data: dc, isLoading } = useChallan(id, orgId);
   const { data: movements } = useMovements(id, orgId);
@@ -153,41 +155,18 @@ async function handleMarkDelivered() {
   setMarking(true);
 
   try {
-    const { error } = await supabase
-      .from("delivery_challans")
-      .update({ status: "delivered" })
-      .eq("id", id);
-
-    if (error) throw error;
-
-    // Also update the linked SO status to delivered
-    // if all challans for this SO are now delivered
-    if (so?.id) {
-      const { data: allChallans, error: challansError } = await supabase
-        .from("delivery_challans")
-        .select("id, status")
-        .eq("so_id", so.id);
-
-      if (challansError) throw challansError;
-
-      const allDelivered = allChallans?.every(
-        (c) => c.status === "delivered" || c.id === id
-      );
-
-      if (allDelivered) {
-        const { error: soError } = await supabase
-          .from("sales_orders")
-          .update({ status: "delivered" })
-          .eq("id", so.id);
-
-        if (soError) throw soError;
-      }
-    }
+    // The SO only becomes 'delivered' when it is fully dispatched and
+    // every challan against it has been delivered (checked in the DB).
+    const result = await markChallanDelivered(id);
 
     await qc.invalidateQueries({ queryKey: ["delivery-challans"] });
     await qc.invalidateQueries({ queryKey: ["sales-orders"] });
 
-    toast.success("Challan marked as delivered");
+    toast.success(
+      result.so_delivered
+        ? `Challan marked as delivered — ${so?.so_number ?? "sales order"} is now fully delivered`
+        : "Challan marked as delivered"
+    );
   } catch (err: unknown) {
     const message =
       err instanceof Error
@@ -225,7 +204,7 @@ async function handleMarkDelivered() {
         </a>
 
         {/* Mark as delivered */}
-        {dc.status === "dispatched" && (
+        {dc.status === "dispatched" && canDispatch && (
           <Button
             size="sm"
             loading={marking}

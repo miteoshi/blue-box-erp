@@ -3,9 +3,9 @@
 import { useState } from 'react'
 import { useOrgId } from "@/lib/hooks/use-tenant";
 import { useParams, useRouter } from 'next/navigation'
-import { useSalesOrder, useUpdateSOStatus, useRecordPayment } from '@/lib/hooks/use-sales-orders'
-import { useCanApprove, useCanSell } from '@/lib/hooks/use-profile'
-import { reserveInventory, releaseInventory } from '@/lib/utils/inventory'
+import { useSalesOrder, useRecordPayment } from '@/lib/hooks/use-sales-orders'
+import { useCanApprove, useCanSell, useCanDispatch } from '@/lib/hooks/use-profile'
+import { reserveSalesOrder, cancelSalesOrder } from '@/lib/utils/inventory'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/layout/page-header'
@@ -31,9 +31,9 @@ export default function SalesOrderDetailPage() {
 
   const canApprove = useCanApprove()
   const canSell    = useCanSell()
+  const canDispatch = useCanDispatch()
 
   const { data: so, isLoading, refetch } = useSalesOrder(id)
-  const { mutate: updateStatus, isPending: updatingStatus } = useUpdateSOStatus()
   const { mutate: recordPayment, isPending: recordingPayment } = useRecordPayment()
 
   const [paymentAmount,   setPaymentAmount]   = useState('')
@@ -88,31 +88,19 @@ const { data: reservations } = useQuery({
 
     setReservingStock(true)
     try {
-      let allSucceeded = true
-      for (const line of lines) {
-        try {
-          await reserveInventory({
-            itemId:  line.item_id,
-            qty:     line.qty,
-            refType: 'sales_order',
-            refId:   salesOrder.id,
-          })
-        } catch (err: unknown) {
-          toast.error(
-            `${line.item?.name}: ${
-              err instanceof Error ? err.message : "Failed to reserve stock"
-            }`
-          );
-          allSucceeded = false
-          break
-        }
-      }
-      if (allSucceeded) {
-        updateStatus({ id, status: 'ready' })
-        toast.success('Stock reserved — order is now ready to dispatch')
-        qc.invalidateQueries({ queryKey: ["so-reservations", orgId, id] });
-        refetch()
-      }
+      // All-or-nothing in the database: either every line is reserved and
+      // the order moves to 'ready', or nothing changes (e.g. one item short).
+      // Only what is still missing is reserved, so this is safe to retry.
+      await reserveSalesOrder(salesOrder.id)
+      toast.success('Stock reserved — order is now ready to dispatch')
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["so-reservations", orgId, id] }),
+        qc.invalidateQueries({ queryKey: ["sales-orders"] }),
+        qc.invalidateQueries({ queryKey: ["stock-levels"] }),
+      ])
+      refetch()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to reserve stock")
     } finally {
       setReservingStock(false)
     }
@@ -133,30 +121,23 @@ const { data: reservations } = useQuery({
     
     setCancelling(true)
     try {
-      // Release each reservation individually
-      // releaseInventory with no qtyToRelease = release all remaining
-      const activeReservations = reservations ?? [];
+      // One transaction: releases every live reservation and cancels.
+      // The database refuses if anything has already been dispatched.
+      const result = await cancelSalesOrder(salesOrder.id);
 
-      for (const reservation of activeReservations) {
-        await releaseInventory({
-          reservationId: reservation.id,
-          notes: `SO cancelled — ${salesOrder.so_number}`,
-        });
-      }
-
-      // Mark SO as cancelled
-      updateStatus({ id, status: "cancelled" });
-
-      if (activeReservations.length > 0) {
+      if (result.reservations_released > 0) {
         toast.success(
-          `SO ${salesOrder.so_number} cancelled — ${activeReservations.length} reservation(s) released back to available stock`
+          `SO ${salesOrder.so_number} cancelled — ${result.reservations_released} reservation(s) released back to available stock`
         );
       } else {
         toast.success(`SO ${salesOrder.so_number} cancelled`);
       }
 
-      qc.invalidateQueries({ queryKey: ["so-reservations", orgId, id] });
-      qc.invalidateQueries({ queryKey: ["stock-levels"] });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["so-reservations", orgId, id] }),
+        qc.invalidateQueries({ queryKey: ["sales-orders"] }),
+        qc.invalidateQueries({ queryKey: ["stock-levels"] }),
+      ]);
       setShowCancelConfirm(false);
       refetch();
     } catch (err: unknown) {
@@ -203,24 +184,29 @@ const { data: reservations } = useQuery({
           Back
         </Button>
 
-        {/* Reserve Stock */}
-        {isConfirmed && !hasReservations && canSell && (
+        {/* Reserve Stock — also completes a half-finished reservation and
+            re-reserves after reservations have expired */}
+        {canSell && (isConfirmed || (isReserved && reservations !== undefined && !hasReservations)) && (
           <Button variant="secondary" size="sm" loading={reservingStock} onClick={handleReserveStock}>
             <Package className="w-4 h-4" />
-            Reserve Stock
+            {isReserved
+              ? 'Re-reserve Stock'
+              : hasReservations
+                ? 'Complete Reservation'
+                : 'Reserve Stock'}
           </Button>
         )}
 
-        {/* Already reserved badge */}
-        {isConfirmed && hasReservations && (
+        {/* Reserved badge */}
+        {isReserved && hasReservations && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-teal-50 border border-teal-200 rounded-lg">
             <CheckCircle className="w-4 h-4 text-teal-600" />
             <span className="text-sm font-medium text-teal-700">Stock Reserved</span>
           </div>
         )}
 
-        {/* Create challan */}
-        {isReserved && canSell && (
+        {/* Create challan — same roles that may write delivery challans */}
+        {isReserved && canDispatch && (
           <Link href={`/dispatch/new?so=${so.id}`}>
             <Button size="sm">
               <Send className="w-4 h-4" />
@@ -238,7 +224,7 @@ const { data: reservations } = useQuery({
         )}
 
         {/* Cancel — only available when not already dispatched/delivered/cancelled */}
-        {!isDispatched && !isDelivered && !isCancelled && canSell && (
+        {!isDispatched && !isDelivered && !isCancelled && challans.length === 0 && canSell && (
           <Button
             variant="outline"
             size="sm"
