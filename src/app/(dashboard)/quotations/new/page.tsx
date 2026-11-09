@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -111,6 +111,7 @@ function useItemsForQuote() {
 export default function NewQuotationPage() {
   const router = useRouter()
   const supabase = createClient()
+  const qc = useQueryClient()
   const orgId = useOrgId()
 
   const { data: clients } = useClients()
@@ -197,53 +198,29 @@ export default function NewQuotationPage() {
     submit ? setSubmitting(true) : setSaving(true)
 
     try {
-      // Generate quotation number with tenant org_id
-      const { data: qtNo, error: rpcErr } = await supabase.rpc("next_qt_no", {
-        p_org_id: orgId,
-      });
-      if (rpcErr) throw rpcErr;
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      // Insert quotation header with org_id
-      const { data: qt, error: qtErr } = await supabase
-        .from("quotations")
-        .insert({
-          org_id: orgId,
-          quotation_no: qtNo as string,
-          created_by: user?.id ?? null,
-          client_id: clientId,
-          valid_until: validUntil || null,
-          delivery_days: deliveryDays ? Number(deliveryDays) : null,
-          payment_terms: paymentTerms || null,
-          transport_note: transportNote || null,
-          notes: notes || null,
-          status: submit ? "pending_approval" : "draft",
-          subtotal,
-          gst_amount: gstAmount,
-          total_amount: totalAmount,
-        })
-        .select("id")
-        .single();
-
-      if (qtErr) throw qtErr;
-
-      // Insert lines
-      const { error: linesErr } = await supabase.from("quotation_lines").insert(
-        lines.map((l, idx) => ({
-          quotation_id: qt.id,
+      // One transaction in the database: header + lines, with the totals
+      // computed from the lines there (not trusted from the browser).
+      const { data, error } = await supabase.rpc("create_quotation", {
+        p_client_id: clientId,
+        p_lines: lines.map((l) => ({
           item_id: l.item_id,
-          description: l.description || null,
+          unit_id: l.unit_id,
           qty: l.qty,
-          unit_id: l.unit_id!,
           unit_rate: l.unit_rate,
           gst_percent: l.gst_percent,
-          sort_order: idx,
-        }))
-      );
+          description: l.description || null,
+        })),
+        p_submit: submit,
+        p_valid_until: validUntil || undefined,
+        p_delivery_days: deliveryDays ? Number(deliveryDays) : undefined,
+        p_payment_terms: paymentTerms || undefined,
+        p_transport_note: transportNote || undefined,
+        p_notes: notes || undefined,
+      });
+      if (error) throw new Error(error.message);
+      const qt = data as { id: string; quotation_no: string };
 
-      if (linesErr) throw linesErr;
+      await qc.invalidateQueries({ queryKey: ["quotations"] });
 
       toast.success(
         submit ? "Quotation submitted for approval" : "Quotation saved as draft"

@@ -109,53 +109,14 @@ export function useUpdateQuotationStatus() {
       status: DocumentStatus
       comments?: string
     }) => {
-      // Update quotation status
-      const updates: Partial<Quotation> = { status }
-
-      if (status === 'approved') {
-        updates.approved_at = new Date().toISOString()
-
-        // approved_by is set by the DB via auth.uid() in audit log
-        // We set it here manually for the UI
-        const { data: { user } } = await supabase.auth.getUser()
-
-        if (user) {
-          updates.approved_by = user.id
-        }
-      }
-
-      const { error: qError } = await supabase
-        .from('quotations')
-        .update(updates)
-        .eq('id', id)
-
-      if (qError) throw qError
-
-      // Log the approval action
-      const { data: { user } } = await supabase.auth.getUser()
-
-      if (user) {
-        const { data: qData } = await supabase
-          .from('quotations')
-          .select('org_id')
-          .eq('id', id)
-          .single()
-
-        if (qData?.org_id) {
-          await supabase.from('approvals').insert({
-            org_id: qData.org_id,
-            ref_type: 'quotation',
-            ref_id: id,
-            action: status === 'approved'
-              ? 'approved'
-              : status === 'rejected'
-              ? 'rejected'
-              : 'revision_requested',
-            actioned_by: user.id,
-            comments: comments ?? null,
-          })
-        }
-      }
+      // The database enforces the approval rules (only admins/managers can
+      // approve or reject, only from pending_approval) and logs the action.
+      const { error } = await supabase.rpc('set_quotation_status', {
+        p_quotation_id: id,
+        p_status:       status,
+        p_comments:     comments,
+      })
+      if (error) throw new Error(error.message)
     },
 
     onSuccess: (_, vars) => {

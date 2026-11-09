@@ -1,10 +1,10 @@
 import { type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 
-// This middleware runs on every request.
+// Next.js 16 "proxy" (formerly middleware) — runs on every request.
 // It refreshes the Supabase session and redirects
 // unauthenticated users to /login.
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   return await updateSession(request)
 }
 
