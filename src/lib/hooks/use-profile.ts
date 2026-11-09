@@ -73,6 +73,12 @@ export function useCanSell(): boolean {
   return role === 'admin' || role === 'manager' || role === 'sales'
 }
 
+// Matches the delivery_challans RLS policy and create_delivery_challan()
+export function useCanDispatch(): boolean {
+  const role = useRole()
+  return role === 'admin' || role === 'manager' || role === 'store'
+}
+
 export function useIsAdmin(): boolean {
   return useRole() === 'admin'
 }

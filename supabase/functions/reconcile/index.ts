@@ -24,14 +24,30 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const SUPABASE_URL            = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
+// ── Caller must be the service role ───────────────────────────
+// verify_jwt is on, so the gateway has already checked the signature;
+// here we only need the role claim. Without this, the public anon key
+// (which is also a valid JWT) could trigger the job.
+function isServiceRoleRequest(req: Request): boolean {
+  const auth = req.headers.get('Authorization') ?? ''
+  if (!auth.startsWith('Bearer ')) return false
+  const token = auth.slice('Bearer '.length).trim()
+  if (token === SUPABASE_SERVICE_ROLE) return true
+  try {
+    const payload = token.split('.')[1]
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
+    return JSON.parse(json)?.role === 'service_role'
+  } catch {
+    return false
+  }
+}
+
 Deno.serve(async (req: Request) => {
 
-  // ── Auth check ────────────────────────────────────────────
-  // Only allow calls with the service_role key or from the scheduler
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  // ── Auth check: service role only ─────────────────────────
+  if (!isServiceRoleRequest(req)) {
     return new Response(
-      JSON.stringify({ error: 'Missing authorization header' }),
+      JSON.stringify({ error: 'Service role required' }),
       { status: 401, headers: { 'Content-Type': 'application/json' } }
     )
   }

@@ -2,10 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { useOrgId } from '@/lib/hooks/use-tenant'
-import { receiveInventory } from '@/lib/utils/inventory'
+import { createInboundReceipt } from '@/lib/utils/inventory'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -121,7 +121,7 @@ function useItemsForGrn(orgId: string | null) {
 
 export default function NewGrnPage() {
   const router   = useRouter()
-  const supabase = createClient()
+  const qc       = useQueryClient()
   const orgId    = useOrgId()
 
 const { data: suppliers } = useSuppliers(orgId);
@@ -191,72 +191,33 @@ const { data: items } = useItemsForGrn(orgId);
 
     setSaving(true)
     try {
-      // Generate GRN number with tenant org_id
-      const { data: grnNo, error: rpcErr } = await supabase.rpc("next_grn_no", {
-        p_org_id: orgId,
+      // One transaction in the database: GRN header + lines + stock
+      // receipt for every line. If anything fails, nothing is written.
+      const result = await createInboundReceipt({
+        supplierId,
+        lines: lines.map((l) => ({
+          itemId:      l.item_id,
+          unitId:      l.unit_id,
+          qtyReceived: l.qty_received,
+          qtyOrdered:  l.qty_ordered,
+          rate:        l.rate,
+          gstPercent:  l.gst_percent,
+        })),
+        receiptDate,
+        transportMode,
+        vehicleNo:  vehicleNo  || undefined,
+        driverName: driverName || undefined,
+        challanNo:  challanNo  || undefined,
+        invoiceNo:  invoiceNo  || undefined,
+        notes:      notes      || undefined,
       });
-      if (rpcErr) throw rpcErr;
 
-      // Get current user
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["inbound-receipts"] }),
+        qc.invalidateQueries({ queryKey: ["stock-levels"] }),
+      ]);
 
-      // Create GRN header with org_id
-      const { data: grn, error: grnErr } = await supabase
-        .from("inbound_receipts")
-        .insert({
-          org_id: orgId,
-          receipt_no: grnNo as string,
-          supplier_id: supplierId,
-          receipt_date: receiptDate,
-          transport_mode: transportMode,
-          vehicle_no: vehicleNo || null,
-          driver_name: driverName || null,
-          challan_no: challanNo || null,
-          invoice_no: invoiceNo || null,
-          total_amount: subtotal,
-          gst_amount: gstAmount,
-          status: "received",
-          notes: notes || null,
-          received_by: user?.id ?? null,
-          created_by: user?.id ?? null,
-        })
-        .select("id")
-        .single();
-
-      if (grnErr) throw grnErr;
-
-      // Insert GRN lines. Note: there is no DB trigger on inbound_receipt_lines that
-      // syncs stock — the receiveInventory() calls below are what create the
-      // stock_movements rows and update inventory_balance for each line.
-      const { error: linesErr } = await supabase
-        .from("inbound_receipt_lines")
-        .insert(
-          lines.map((l) => ({
-            receipt_id: grn.id,
-            item_id: l.item_id,
-            qty_ordered: l.qty_ordered > 0 ? l.qty_ordered : null,
-            qty_received: l.qty_received,
-            unit_id: l.unit_id,
-            rate: l.rate,
-            gst_percent: l.gst_percent,
-          }))
-        );
-
-      if (linesErr) throw linesErr;
-
-      // ── Create stock movements manually ─────────────────────
-      for (const line of lines) {
-        await receiveInventory({
-          itemId: line.item_id,
-          qty: line.qty_received,
-          rate: line.rate,
-          refId: grn.id,
-        });
-      }
-
-      toast.success(`GRN ${grnNo} created — stock updated`);
+      toast.success(`GRN ${result.receipt_no} created — stock updated`);
       router.push("/inbound");
     } catch (err: unknown) {
         toast.error(err instanceof Error ? err.message : 'Failed to create GRN')

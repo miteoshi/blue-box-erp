@@ -2018,6 +2018,7 @@ export type Database = {
         Returns: Json
       }
       assert_item_in_my_org: { Args: { p_item_id: string }; Returns: undefined }
+      cancel_sales_order: { Args: { p_so_id: string }; Returns: Json }
       check_bom_availability: {
         Args: { p_production_order_id: string }
         Returns: Json
@@ -2031,6 +2032,36 @@ export type Database = {
           p_ref_id?: string
           p_ref_type?: string
           p_reservation_id?: string
+        }
+        Returns: Json
+      }
+      convert_quotation_to_sales_order: {
+        Args: { p_quotation_id: string }
+        Returns: Json
+      }
+      create_delivery_challan: {
+        Args: {
+          p_challan_date?: string
+          p_driver_name?: string
+          p_lines: Json
+          p_notes?: string
+          p_so_id: string
+          p_transport_mode?: Database["public"]["Enums"]["transport_mode"]
+          p_vehicle_no?: string
+        }
+        Returns: Json
+      }
+      create_inbound_receipt: {
+        Args: {
+          p_challan_no?: string
+          p_driver_name?: string
+          p_invoice_no?: string
+          p_lines: Json
+          p_notes?: string
+          p_receipt_date?: string
+          p_supplier_id: string
+          p_transport_mode?: Database["public"]["Enums"]["transport_mode"]
+          p_vehicle_no?: string
         }
         Returns: Json
       }
@@ -2076,6 +2107,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      mark_challan_delivered: { Args: { p_challan_id: string }; Returns: Json }
       my_org: { Args: never; Returns: string }
       my_role: {
         Args: never
@@ -2143,6 +2175,10 @@ export type Database = {
           p_ref_id: string
           p_ref_type: string
         }
+        Returns: Json
+      }
+      reserve_sales_order: {
+        Args: { p_expiry_hours?: number; p_so_id: string }
         Returns: Json
       }
       validate_stock_sufficiency: {
