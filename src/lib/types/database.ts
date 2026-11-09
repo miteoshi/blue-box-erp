@@ -2018,6 +2018,10 @@ export type Database = {
         Returns: Json
       }
       assert_item_in_my_org: { Args: { p_item_id: string }; Returns: undefined }
+      cancel_production_order: {
+        Args: { p_production_order_id: string }
+        Returns: Json
+      }
       cancel_sales_order: { Args: { p_so_id: string }; Returns: Json }
       check_bom_availability: {
         Args: { p_production_order_id: string }
@@ -2065,6 +2069,10 @@ export type Database = {
         }
         Returns: Json
       }
+      complete_production_order: {
+        Args: { p_production_order_id: string }
+        Returns: Json
+      }
       create_organization: {
         Args: {
           p_categories?: Json
@@ -2075,6 +2083,17 @@ export type Database = {
           p_units?: Json
         }
         Returns: string
+      }
+      create_production_order: {
+        Args: {
+          p_expiry_hours?: number
+          p_finished_item_id: string
+          p_materials: Json
+          p_notes?: string
+          p_qty: number
+          p_target_date?: string
+        }
+        Returns: Json
       }
       dispatch_inventory: {
         Args: {
@@ -2179,6 +2198,10 @@ export type Database = {
       }
       reserve_sales_order: {
         Args: { p_expiry_hours?: number; p_so_id: string }
+        Returns: Json
+      }
+      start_production_order: {
+        Args: { p_production_order_id: string }
         Returns: Json
       }
       validate_stock_sufficiency: {

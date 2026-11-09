@@ -6,13 +6,13 @@ import { useState, useEffect } from 'react'
 
 import { useRouter } from 'next/navigation'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { createClient } from '@/lib/supabase/client'
 
 import { useOrgId } from '@/lib/hooks/use-tenant'
 
-import { reserveInventory } from '@/lib/utils/inventory'
+import { createProductionOrder } from '@/lib/utils/inventory'
 
 import { PageHeader } from '@/components/layout/page-header'
 
@@ -215,6 +215,8 @@ export default function NewProductionPage() {
   const router   = useRouter()
 
   const supabase = createClient()
+
+  const qc       = useQueryClient()
 
   const orgId    = useOrgId()
 
@@ -566,90 +568,24 @@ const { data: rawItems } = useRawMaterialItems(orgId);
 
     try {
 
-      const { data: { user } } = await supabase.auth.getUser()
-
-      const { data: prdNo, error: rpcErr } = await supabase.rpc('next_prd_no', {
-
-        p_org_id: orgId,
-
+      // One transaction in the database: order + finished-goods line +
+      // a reservation for every raw material. If any material is short,
+      // nothing is created.
+      // qty_needed is already qty_per_unit × finishQty at this point.
+      const prd = await createProductionOrder({
+        finishedItemId: finishedItem.item_id,
+        qty:            finishQty,
+        materials:      rawMaterials.map((raw) => ({ itemId: raw.item_id, qty: raw.qty_needed })),
+        targetDate:     targetDate || undefined,
+        notes:          notes      || undefined,
+        expiryHours:    168,
       })
 
-      if (rpcErr) throw rpcErr
-
-
-
-      const { data: prd, error: prdErr } = await supabase
-
-        .from('production_orders')
-
-        .insert({
-
-          org_id:      orgId,
-
-          po_number:   prdNo as string,
-
-          so_id:       null,
-
-          status:      'pending',
-
-          target_date: targetDate || null,
-
-          notes:       notes      || null,
-
-          created_by:  user?.id   ?? null,
-
-        })
-
-        .select('id, po_number')
-
-        .single()
-
-
-
-      if (prdErr) throw prdErr
-
-
-
-      const { error: itemsErr } = await supabase
-
-        .from("production_order_items")
-
-        .insert({
-          production_order_id: prd.id,
-          item_id: finishedItem.item_id,
-          qty_required: finishQty,
-          unit_id: finishedItem.unit_id,
-        });
-
-
-
-      if (itemsErr) throw itemsErr
-
-
-
-      // ── Reserve raw materials ─────────────────────────────
-
-      // qty_needed is already qty_per_unit × finishQty at this point
-
-      for (const raw of rawMaterials) {
-
-        await reserveInventory({
-
-          itemId:      raw.item_id,
-
-          qty:         raw.qty_needed,   // correctly scaled to finishQty
-
-          refType:     'production_order',
-
-          refId:       prd.id,
-
-          expiryHours: 168,
-
-          notes:       `Reserved for ${prd.po_number} — producing ${finishQty}× ${finishedItem.item_name}`,
-
-        })
-
-      }
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['production-orders'] }),
+        qc.invalidateQueries({ queryKey: ['tasks'] }),
+        qc.invalidateQueries({ queryKey: ['stock-levels'] }),
+      ])
 
 
 
